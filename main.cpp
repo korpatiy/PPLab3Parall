@@ -10,7 +10,7 @@ const double a = 1.0;
 const double h = a / N;
 const double tau = h * h / 2 / 2;
 const double T = 0.5;
-//Находим кол-во точек по шагам времени. Факту - m
+//Находим кол-во точек по шагам времени.
 const int Nt = T / tau;
 //лямбда
 const double L = tau / h;
@@ -55,14 +55,14 @@ int main(int argc, char **argv) {
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     MPI_Comm_size(MPI_COMM_WORLD, &size);
 
-    const auto time = MPI_Wtime();
+    double time = MPI_Wtime();
 
     MPI_Comm comm_1D;
     int dims[1] = {size};
     int periods[1] = {0};
     MPI_Cart_create(MPI_COMM_WORLD, 1, dims, periods, 0, &comm_1D);
 
-    // получение координат соседей
+    //Координаты соседей
     int left;
     int right;
     MPI_Cart_shift(comm_1D, 0, 1, &left, &right);
@@ -79,6 +79,7 @@ int main(int argc, char **argv) {
 
     //Идем по времени от 0 до T. y3 замена функции pp
     for (int t = 1; t < Nt; t++) {
+        //Производим обмен между граничными процессами
         if (rank % 2 == 0) {
             MPI_Send(&u[1 + (N + 1)], 1, MPI_DOUBLE, left, 0, comm_1D);
             MPI_Send(&u[N + (N + 1)], 1, MPI_DOUBLE, right, 0, comm_1D);
@@ -86,13 +87,14 @@ int main(int argc, char **argv) {
             MPI_Recv(&u[0 + (N + 1)], 1, MPI_DOUBLE, left, 0, comm_1D, &status);
             MPI_Recv(&u[N + 1 + (N + 1)], 1, MPI_DOUBLE, right, 0, comm_1D, &status);
         } else {
-            MPI_Recv(&u[0+ (N + 1)], 1, MPI_DOUBLE, left, 0, comm_1D, &status);
-            MPI_Recv(&u[N + 1+(N + 1)], 1, MPI_DOUBLE, right, 0, comm_1D, &status);
+            MPI_Recv(&u[0 + (N + 1)], 1, MPI_DOUBLE, left, 0, comm_1D, &status);
+            MPI_Recv(&u[N + 1 + (N + 1)], 1, MPI_DOUBLE, right, 0, comm_1D, &status);
 
-            MPI_Send(&u[1+(N + 1)], 1, MPI_DOUBLE, left, 0, comm_1D);
-            MPI_Send(&u[N + 1+(N + 1)], 1, MPI_DOUBLE, right, 0, comm_1D);
+            MPI_Send(&u[1 + (N + 1)], 1, MPI_DOUBLE, left, 0, comm_1D);
+            MPI_Send(&u[N + 1 + (N + 1)], 1, MPI_DOUBLE, right, 0, comm_1D);
         }
 
+        //Вычисление УМФ -> подпрограмма pp по факту
         u[(t + 1) * (N + 1) + 0] = 0.0;
         u[(t + 1) * (N + 1) + N] = 0.0;
         for (int i = 1; i < N; i++) {
@@ -102,31 +104,45 @@ int main(int argc, char **argv) {
         }
     }
 
-    //Собираем все 
+    //Собираем все
     auto *u_full = new double[(Nt + 1) * (N + 1)];
     MPI_Gather(u, (Nt + 1) * (N + 1), MPI_DOUBLE, u_full, (Nt + 1) * (N + 1), MPI_DOUBLE, 0, MPI_COMM_WORLD);
 
+    time = MPI_Wtime() - time;
+    auto *full_time = new double[size];
+    MPI_Gather(&time, 1, MPI_DOUBLE, full_time, 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
     //double time2 = (static_cast<double>(clock()) - time1) / CLOCKS_PER_SEC;
     // fileOutput << "Time: " << time2 << "\n";
 
-    //выводим координаты x
-    fileOutput << 0 << ",";
-    for (int i = 0; i < N; i++) {
-        fileOutput << i * h << ",";
-    }
-    fileOutput << 1 << "\n";
-
-    for (int i = 0; i <= Nt; i++) {
-        //координаты по T
-        fileOutput << i * tau << ",";
-        for (int j = 0; j < N; j++) {
-            fileOutput << u_full[i * (N + 1) + j] << ",";
+    if (rank == 0) {
+        double max_time = full_time[0];
+        for (int i = 0; i < size; i++) {
+            if (full_time[i] > max_time)
+                max_time = full_time[i];
         }
-        fileOutput << u_full[i * (N + 1) + N];
-        fileOutput << "\n";
-    }
-    fileOutput.close();
 
+        fileOutput << "Time: " << max_time * 1000 << "\n";
+
+        //выводим координаты x
+        fileOutput << 0 << ",";
+        for (int i = 0; i < N; i++) {
+            fileOutput << i * h << ",";
+        }
+        fileOutput << 1 << "\n";
+
+        for (int i = 0; i <= Nt; i++) {
+            //координаты по T
+            fileOutput << i * tau << ",";
+            for (int j = 0; j < N; j++) {
+                fileOutput << u_full[i * (N + 1) + j] << ",";
+            }
+            fileOutput << u_full[i * (N + 1) + N];
+            fileOutput << "\n";
+        }
+        fileOutput.close();
+    }
+
+    //чистим память
     delete[] u;
     MPI_Barrier(comm_1D);
     MPI_Finalize();
