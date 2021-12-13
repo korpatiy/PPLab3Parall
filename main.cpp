@@ -46,9 +46,6 @@ double funcExample(double x) {
 }*/
 
 int main(int argc, char **argv) {
-
-    ofstream fileOutput = ofstream("output.txt");
-
     int rank, size;
     MPI_Status status;
     MPI_Init(&argc, &argv);
@@ -105,14 +102,12 @@ int main(int argc, char **argv) {
     }
 
     //Собираем все
-    auto *u_full = new double[(Nt + 1) * (N + 1)];
-    MPI_Gather(u, (Nt + 1) * (N + 1), MPI_DOUBLE, u_full, (Nt + 1) * (N + 1), MPI_DOUBLE, 0, MPI_COMM_WORLD);
+    auto *u_full = new double[4 * (Nt + 1) * (N + 1)]{0};
+    MPI_Gather(u, (Nt + 1) * (N + 1), MPI_DOUBLE, u_full, (Nt + 1) * (N + 1), MPI_DOUBLE, 0, comm_1D);
 
     time = MPI_Wtime() - time;
     auto *full_time = new double[size];
-    MPI_Gather(&time, 1, MPI_DOUBLE, full_time, 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
-    //double time2 = (static_cast<double>(clock()) - time1) / CLOCKS_PER_SEC;
-    // fileOutput << "Time: " << time2 << "\n";
+    MPI_Gather(&time, 1, MPI_DOUBLE, full_time, 1, MPI_DOUBLE, 0, comm_1D);
 
     if (rank == 0) {
         double max_time = full_time[0];
@@ -121,6 +116,7 @@ int main(int argc, char **argv) {
                 max_time = full_time[i];
         }
 
+        ofstream fileOutput = ofstream("output.txt");
         fileOutput << "Time: " << max_time * 1000 << "\n";
 
         //выводим координаты x
@@ -143,8 +139,10 @@ int main(int argc, char **argv) {
     }
 
     //чистим память
-    delete[] u;
     MPI_Barrier(comm_1D);
     MPI_Finalize();
+    delete[] u;
+    delete[] u_full;
+    delete[] full_time;
     return 0;
 }
