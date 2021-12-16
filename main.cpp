@@ -18,19 +18,19 @@ const double L2 = pow(L, 2);
 
 //функция по варианту
 double func(double x) {
-    if (x <= 0.7 && x >= 0.5)
-        return (9.0 * x - 4.5) / 0.2;
-    if (x > 0.7 && x <= 0.9)
-        return (-9.0 * x + 8.1) / 0.2;
-    return 0.0;
+  if (x <= 0.7 && x >= 0.5)
+    return (9.0 * x - 4.5) / 0.2;
+  if (x > 0.7 && x <= 0.9)
+    return (-9.0 * x + 8.1) / 0.2;
+  return 0.0;
 }
 
 double g(double x) { return 0.0; }
 
 //функция по методичке
 double funcExample(double x) {
-    if (x < 0.5) return 2.0 * x;
-    return 2.0 - 2.0 * x;
+  if (x < 0.5) return 2.0 * x;
+  return 2.0 - 2.0 * x;
 }
 
 //Подпрограмма по методичке
@@ -47,133 +47,130 @@ double funcExample(double x) {
 
 int main(int argc, char **argv) {
 
-    int rank, size;
-    MPI_Status status;
-    MPI_Init(&argc, &argv);
-    MPI_Comm_size(MPI_COMM_WORLD, &size);
+  int rank, size;
+  MPI_Status status;
+  MPI_Init(&argc, &argv);
+  MPI_Comm_size(MPI_COMM_WORLD, &size);
 
-    double time = MPI_Wtime();
+  double time = MPI_Wtime();
 
-    int dims[1] = {0};
-    MPI_Dims_create(size, 1, dims);
-    int periods[1] = {0};
+  int dims[1] = {0};
+  MPI_Dims_create(size, 1, dims);
+  int periods[1] = {0};
 
-    MPI_Comm comm_1D;
-    MPI_Cart_create(MPI_COMM_WORLD, 1, dims, periods, true, &comm_1D);
+  MPI_Comm comm_1D;
+  MPI_Cart_create(MPI_COMM_WORLD, 1, dims, periods, true, &comm_1D);
 
-    //Координаты соседей
-    int left;
-    int right;
-    //Нахождение соседей слева и справа
-    MPI_Cart_shift(comm_1D, 0, 1, &left, &right);
+  //Координаты соседей
+  int left;
+  int right;
+  //Нахождение соседей слева и справа
+  MPI_Cart_shift(comm_1D, 0, 1, &left, &right);
 
-    MPI_Comm_rank(comm_1D, &rank);
+  MPI_Comm_rank(comm_1D, &rank);
 
-    //Нарезаем часть, которую будет обрабатывать каждый процессор
-    auto matrixPart = (Nt + 1) / size;
+  //Нарезаем часть, которую будет обрабатывать каждый процессор
+  auto matrixPart = (Nt + 1) / size;
 
-    //Произвольный тип данных для строки
-    MPI_Datatype MPI_RAW;
-    MPI_Type_vector(1, matrixPart, matrixPart, MPI_DOUBLE, &MPI_RAW);
-    MPI_Type_commit(&MPI_RAW);
+  //Произвольный тип данных для строки
+  MPI_Datatype MPI_RAW;
+  MPI_Type_vector(1, matrixPart, matrixPart, MPI_DOUBLE, &MPI_RAW);
+  MPI_Type_commit(&MPI_RAW);
 
-    auto begIdx = matrixPart * rank;
-    auto endIdx = (rank == size - 1 ? N : begIdx + matrixPart - 1);
+  auto begIdx = matrixPart * rank;
+  auto endIdx = (rank == size - 1 ? N : begIdx + matrixPart - 1);
 
-    auto *u = new double[(Nt + 1) * (endIdx - begIdx + 1)];
+  auto currN = endIdx - begIdx;
+  auto currSize = currN + 1;
+  auto *currU = new double[(Nt + 1) * currSize];
 
-    //начальные и краевые условия
-    u[N + 1] = u[N + N + 1] = u[N] = u[0] = 0.0;
-    for (int i = 1; i < N; i++) {
-        //x от 0 до 1 в i * h
-        u[0 * (N + 1) + i] = func(i * h); //y1
-        u[1 * (N + 1) + i] = u[0 * (N + 1) + i] + tau * g(i); //y2
+  //начальные и краевые условия
+  if (begIdx == 0)
+    currU[currSize] = currU[0] = 0.0;
+
+  if (endIdx == N)
+    currU[currSize + currN] = currU[currN] = 0.0;
+
+  for (int i = 1; i <= currN; i++) {
+    //x от 0 до 1 в i * h
+    currU[0 * currSize + i] = func((begIdx + i) * h); //y1
+    currU[1 * currSize + i] = currU[0 * currSize + i] + tau * g(begIdx + i); //y2
+  }
+
+  double left_prev, right_prev;
+  /* MPI_Send(&currU[1 * currSize + 0], 1, MPI_DOUBLE, neighbours_ranks[LEFT], LEFT, comm_1D);
+   MPI_Send(&currU[1 * currSize + currN], 1, MPI_DOUBLE, neighbours_ranks[RIGHT], RIGHT, comm_1D);
+   MPI_Recv(&left_prev, 1, MPI_DOUBLE, neighbours_ranks[LEFT], RIGHT, comm_1D, &status);
+   MPI_Recv(&right_prev, 1, MPI_DOUBLE, neighbours_ranks[RIGHT], LEFT, comm_1D, &status);*/
+
+  //Идем по времени от 0 до T. y3 замена функции pp
+  for (int t = 1; t < Nt; t++) {
+     if (rank % 2 == 0) {
+       MPI_Send(&currU[1 + currSize], 1, MPI_DOUBLE, left, 0, comm_1D);
+       MPI_Send(&currU[currN + currSize], 1, MPI_DOUBLE, right, 0, comm_1D);
+
+       MPI_Recv(&currU[0 + currSize], 1, MPI_DOUBLE, left, 0, comm_1D, &status);
+       MPI_Recv(&currU[currN + 1 + currSize], 1, MPI_DOUBLE, right, 0, comm_1D, &status);
+     } else {
+       MPI_Recv(&currU[0 + currSize], 1, MPI_DOUBLE, left, 0, comm_1D, &status);
+       MPI_Recv(&currU[currN + 1 + currSize], 1, MPI_DOUBLE, right, 0, comm_1D, &status);
+
+       MPI_Send(&currU[1 + currSize], 1, MPI_DOUBLE, left, 0, comm_1D);
+       MPI_Send(&currU[currN + 1 + currSize], 1, MPI_DOUBLE, right, 0, comm_1D);
+     }
+
+    /*if (begIdx == 0) {
+      currU[(t + 1) * currSize + 0] = 0.0;
+      currU[(t + 1) * currSize + currN] = 0.0;
+
+      currU[(t + 1) * currSize + currN]
     }
+*/
+    currU[(t + 1) * currSize + 0] = 0.0;
+    currU[(t + 1) * currSize + currN] = 0.0;
 
-
-    //Идем по времени от 0 до T. y3 замена функции pp
-    for (int t = begIdx * rank; t < Nt; t++) {
-        //Производим обмен между граничными процессами
-        if (rank % 2 == 0) {
-            MPI_Send(&u[1 + (N + 1)], 1, MPI_DOUBLE, left, 0, comm_1D);
-            MPI_Send(&u[N + (N + 1)], 1, MPI_DOUBLE, right, 0, comm_1D);
-
-            MPI_Recv(&u[0 + (N + 1)], 1, MPI_DOUBLE, left, 0, comm_1D, &status);
-            MPI_Recv(&u[N + 1 + (N + 1)], 1, MPI_DOUBLE, right, 0, comm_1D, &status);
-        } else {
-            MPI_Recv(&u[0 + (N + 1)], 1, MPI_DOUBLE, left, 0, comm_1D, &status);
-            MPI_Recv(&u[N + 1 + (N + 1)], 1, MPI_DOUBLE, right, 0, comm_1D, &status);
-
-            MPI_Send(&u[1 + (N + 1)], 1, MPI_DOUBLE, left, 0, comm_1D);
-            MPI_Send(&u[N + 1 + (N + 1)], 1, MPI_DOUBLE, right, 0, comm_1D);
-        }
-
-        //Вычисление УМФ -> подпрограмма pp по факту
-        u[(t + 1) * (N + 1) + 0] = 0.0;
-        u[(t + 1) * (N + 1) + N] = 0.0;
-        for (int i = 1; i < N; i++) {
-            u[(t + 1) * (N + 1) + i] =
-                    2.0 * (1.0 - L2) * u[t * (N + 1) + i] + L2 * (u[t * (N + 1) + i + 1] + u[t * (N + 1) + i - 1])
-                    - u[(t - 1) * (N + 1) + i];
-        }
+    for (int i = 1; i < currN; i++) {
+      currU[(t + 1) * currSize + i] =
+          2.0 * (1.0 - L2) * currU[t * currSize + i] + L2 * (currU[t * currSize + i + 1] + currU[t * currSize + i - 1])
+              - currU[(t - 1) * currSize + i];
     }
+  }
 
-    if (rank == 2) {
-        ofstream fileOutput1 = ofstream("output1.txt");
-        for (int i = 0; i <= Nt; i++) {
-            //координаты по T
-            fileOutput1 << i * tau << ",";
-            for (int j = 0; j < N; j++) {
-                fileOutput1 << u[i * (N + 1) + j] << ",";
-            }
-            fileOutput1 << u[i * (N + 1) + N];
-            fileOutput1 << "\n";
-        }
-        fileOutput1 << "rank " << rank << "\n";
+  double *uFull = nullptr;
+  if (rank == 0)
+    uFull = new double[(Nt + 1) * size * matrixPart];
+
+  MPI_Gather(&currU[0], Nt + 1, MPI_RAW,
+             &uFull[0], Nt + 1, MPI_RAW, 0, comm_1D);
+
+  if (rank == 0) {
+
+    ofstream fileOutput = ofstream("output.txt");
+    //fileOutput << "Time: " << max_time * 1000 << "\n";
+
+    //выводим координаты x
+    fileOutput << 0 << ",";
+    for (int i = 0; i < N; i++) {
+      fileOutput << i * h << ",";
     }
+    fileOutput << 1 << "\n";
 
-    //Собираем все
-    auto *u_full = new double[4 * (Nt + 1) * (N + 1)]{0};
-    MPI_Gather(u, (Nt + 1) * (N + 1), MPI_DOUBLE, u_full, (Nt + 1) * (N + 1), MPI_DOUBLE, 0, comm_1D);
-
-    time = MPI_Wtime() - time;
-    auto *full_time = new double[size];
-    MPI_Gather(&time, 1, MPI_DOUBLE, full_time, 1, MPI_DOUBLE, 0, comm_1D);
-
-    if (rank == 0) {
-        double max_time = full_time[0];
-        for (int i = 0; i < size; i++) {
-            if (full_time[i] > max_time)
-                max_time = full_time[i];
-        }
-
-        ofstream fileOutput = ofstream("output.txt");
-        fileOutput << "Time: " << max_time * 1000 << "\n";
-
-        //выводим координаты x
-        fileOutput << 0 << ",";
-        for (int i = 0; i < N; i++) {
-            fileOutput << i * h << ",";
-        }
-        fileOutput << 1 << "\n";
-
-        for (int i = 0; i <= Nt; i++) {
-            //координаты по T
-            fileOutput << i * tau << ",";
-            for (int j = 0; j < N; j++) {
-                fileOutput << u_full[i * (N + 1) + j] << ",";
-            }
-            fileOutput << u_full[i * (N + 1) + N];
-            fileOutput << "\n";
-        }
-        fileOutput.close();
+    for (int i = 0; i <= Nt; i++) {
+      //координаты по T
+      fileOutput << i * tau << ",";
+      for (int j = 0; j < N; j++) {
+        fileOutput << uFull[i * (N + 1) + j] << ",";
+      }
+      fileOutput << uFull[i * (N + 1) + N];
+      fileOutput << "\n";
     }
+    fileOutput.close();
+  }
 
-    //чистим память
-    MPI_Barrier(comm_1D);
-    MPI_Finalize();
-    delete[] u;
-    delete[] u_full;
-    delete[] full_time;
-    return 0;
+  //чистим память
+  MPI_Barrier(comm_1D);
+  MPI_Finalize();
+  delete[] currU;
+  delete[] uFull;
+  return 0;
 }
