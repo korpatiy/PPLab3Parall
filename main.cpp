@@ -5,7 +5,7 @@
 
 using namespace std;
 
-const int N = 10;
+const int N = 11;
 const double a = 1.0;
 const double h = a / N;
 const double tau = h * h / 2 / 2;
@@ -46,25 +46,41 @@ double funcExample(double x) {
 }*/
 
 int main(int argc, char **argv) {
+
     int rank, size;
     MPI_Status status;
     MPI_Init(&argc, &argv);
-    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     MPI_Comm_size(MPI_COMM_WORLD, &size);
 
     double time = MPI_Wtime();
 
-    MPI_Comm comm_1D;
-    int dims[1] = {size};
+    int dims[1] = {0};
+    MPI_Dims_create(size, 1, dims);
     int periods[1] = {0};
-    MPI_Cart_create(MPI_COMM_WORLD, 1, dims, periods, 0, &comm_1D);
+
+    MPI_Comm comm_1D;
+    MPI_Cart_create(MPI_COMM_WORLD, 1, dims, periods, true, &comm_1D);
 
     //Координаты соседей
     int left;
     int right;
+    //Нахождение соседей слева и справа
     MPI_Cart_shift(comm_1D, 0, 1, &left, &right);
 
-    auto *u = new double[(Nt + 1) * (N + 1)];
+    MPI_Comm_rank(comm_1D, &rank);
+
+    //Нарезаем часть, которую будет обрабатывать каждый процессор
+    auto matrixPart = (Nt + 1) / size;
+
+    //Произвольный тип данных для строки
+    MPI_Datatype MPI_RAW;
+    MPI_Type_vector(1, matrixPart, matrixPart, MPI_DOUBLE, &MPI_RAW);
+    MPI_Type_commit(&MPI_RAW);
+
+    auto begIdx = matrixPart * rank;
+    auto endIdx = (rank == size - 1 ? N : begIdx + matrixPart - 1);
+
+    auto *u = new double[(Nt + 1) * (endIdx - begIdx + 1)];
 
     //начальные и краевые условия
     u[N + 1] = u[N + N + 1] = u[N] = u[0] = 0.0;
@@ -74,8 +90,9 @@ int main(int argc, char **argv) {
         u[1 * (N + 1) + i] = u[0 * (N + 1) + i] + tau * g(i); //y2
     }
 
+
     //Идем по времени от 0 до T. y3 замена функции pp
-    for (int t = 1; t < Nt; t++) {
+    for (int t = begIdx * rank; t < Nt; t++) {
         //Производим обмен между граничными процессами
         if (rank % 2 == 0) {
             MPI_Send(&u[1 + (N + 1)], 1, MPI_DOUBLE, left, 0, comm_1D);
@@ -99,6 +116,20 @@ int main(int argc, char **argv) {
                     2.0 * (1.0 - L2) * u[t * (N + 1) + i] + L2 * (u[t * (N + 1) + i + 1] + u[t * (N + 1) + i - 1])
                     - u[(t - 1) * (N + 1) + i];
         }
+    }
+
+    if (rank == 2) {
+        ofstream fileOutput1 = ofstream("output1.txt");
+        for (int i = 0; i <= Nt; i++) {
+            //координаты по T
+            fileOutput1 << i * tau << ",";
+            for (int j = 0; j < N; j++) {
+                fileOutput1 << u[i * (N + 1) + j] << ",";
+            }
+            fileOutput1 << u[i * (N + 1) + N];
+            fileOutput1 << "\n";
+        }
+        fileOutput1 << "rank " << rank << "\n";
     }
 
     //Собираем все
