@@ -33,17 +33,23 @@ double funcExample(double x) {
   return 2.0 - 2.0 * x;
 }
 
-//Подпрограмма по методичке
-/*double *pp(double tau, double h, const double *y1, const double *y2) {
-  auto *y3 = new double[N + 1];
-  y3[0] = 0;
-  y3[N] = 0;
-  for (int i = 1; i < N; i++) {
-    //была найдена ошибка -> во втором слагаемом +
-    y3[i] = 2 * (1 - L2) * y2[i] + L2 * (y2[i + 1] - y2[i - 1]) - y1[i];
-  }
-  return y3;
-}*/
+double countRightPrev(int currN, int currSize, const double *currU, double right_prev, int t) {
+  return 2.0 * (1.0 - L2) * currU[t * currSize + currN]
+      + L2 * (currU[t * currSize + currN - 1] + right_prev)
+      - currU[(t - 1) * currSize + currN];
+}
+
+double countLeftPrev(int currSize, const double *currU, double left_prev, int t) {
+  return 2.0 * (1.0 - L2) * currU[t * currSize]
+      + L2 * (left_prev + currU[t * currSize + 1])
+      - currU[(t - 1) * currSize];
+}
+
+//Умф по методичке
+double umf(int currSize, const double *currU, int t, int i) {
+  return 2.0 * (1.0 - L2) * currU[t * currSize + i] + L2 * (currU[t * currSize + i + 1] + currU[t * currSize + i - 1])
+      - currU[(t - 1) * currSize + i];
+}
 
 int main(int argc, char **argv) {
 
@@ -93,53 +99,54 @@ int main(int argc, char **argv) {
 
   for (int i = 1; i <= currN; i++) {
     //x от 0 до 1 в i * h
-    currU[0 * currSize + i] = func((begIdx + i) * h); //y1
-    currU[1 * currSize + i] = currU[0 * currSize + i] + tau * g(begIdx + i); //y2
+    currU[i] = func((begIdx + i) * h); //y1
+    currU[currSize + i] = currU[i] + tau * g(begIdx + i); //y2
   }
 
   double left_prev, right_prev;
-  /* MPI_Send(&currU[1 * currSize + 0], 1, MPI_DOUBLE, neighbours_ranks[LEFT], LEFT, comm_1D);
-   MPI_Send(&currU[1 * currSize + currN], 1, MPI_DOUBLE, neighbours_ranks[RIGHT], RIGHT, comm_1D);
-   MPI_Recv(&left_prev, 1, MPI_DOUBLE, neighbours_ranks[LEFT], RIGHT, comm_1D, &status);
-   MPI_Recv(&right_prev, 1, MPI_DOUBLE, neighbours_ranks[RIGHT], LEFT, comm_1D, &status);*/
+  MPI_Send(&currU[1 * currSize + 0], 1, MPI_DOUBLE, left, 0, comm_1D);
+  MPI_Send(&currU[1 * currSize + currN], 1, MPI_DOUBLE, right, 0, comm_1D);
+  MPI_Recv(&left_prev, 1, MPI_DOUBLE, left, 0, comm_1D, &status);
+  MPI_Recv(&right_prev, 1, MPI_DOUBLE, right, 0, comm_1D, &status);
 
-  //Идем по времени от 0 до T. y3 замена функции pp
+  //Идем по времени от 0 до T.
   for (int t = 1; t < Nt; t++) {
-     if (rank % 2 == 0) {
-       MPI_Send(&currU[1 + currSize], 1, MPI_DOUBLE, left, 0, comm_1D);
-       MPI_Send(&currU[currN + currSize], 1, MPI_DOUBLE, right, 0, comm_1D);
-
-       MPI_Recv(&currU[0 + currSize], 1, MPI_DOUBLE, left, 0, comm_1D, &status);
-       MPI_Recv(&currU[currN + 1 + currSize], 1, MPI_DOUBLE, right, 0, comm_1D, &status);
-     } else {
-       MPI_Recv(&currU[0 + currSize], 1, MPI_DOUBLE, left, 0, comm_1D, &status);
-       MPI_Recv(&currU[currN + 1 + currSize], 1, MPI_DOUBLE, right, 0, comm_1D, &status);
-
-       MPI_Send(&currU[1 + currSize], 1, MPI_DOUBLE, left, 0, comm_1D);
-       MPI_Send(&currU[currN + 1 + currSize], 1, MPI_DOUBLE, right, 0, comm_1D);
-     }
-
-    /*if (begIdx == 0) {
-      currU[(t + 1) * currSize + 0] = 0.0;
-      currU[(t + 1) * currSize + currN] = 0.0;
-
-      currU[(t + 1) * currSize + currN]
+    if (begIdx == 0) {
+      currU[(t + 1) * currSize] = 0.0;
+      if (endIdx == N)
+        currU[(t + 1) * currSize + currN] = 0.0;
+      else
+        currU[(t + 1) * currSize + currN] = countRightPrev(currN, currSize, currU, right_prev, t);
+    } else {
+      if (endIdx == N) {
+        currU[(t + 1) * currSize + currN] = 0.0;
+        currU[(t + 1) * currSize] = countLeftPrev(currSize, currU, left_prev, t);
+      } else {
+        if (currN == 0)
+          currU[(t + 1) * currSize] = 2.0 * (1.0 - L2) * currU[t * currSize]
+              + L2 * (left_prev + right_prev)
+              - currU[(t - 1) * currSize];
+        else {
+          currU[(t + 1) * currSize + currN] = countRightPrev(currN, currSize, currU, right_prev, t);
+          currU[(t + 1) * currSize] = countLeftPrev(currSize, currU, left_prev, t);
+        }
+      }
     }
-*/
-    currU[(t + 1) * currSize + 0] = 0.0;
-    currU[(t + 1) * currSize + currN] = 0.0;
 
     for (int i = 1; i < currN; i++) {
-      currU[(t + 1) * currSize + i] =
-          2.0 * (1.0 - L2) * currU[t * currSize + i] + L2 * (currU[t * currSize + i + 1] + currU[t * currSize + i - 1])
-              - currU[(t - 1) * currSize + i];
+      currU[(t + 1) * currSize + i] = umf(currSize, currU, t, i);
     }
+
+    MPI_Send(&currU[(t + 1) * currSize], 1, MPI_DOUBLE, left, 0, comm_1D);
+    MPI_Send(&currU[(t + 1) * currSize + currN], 1, MPI_DOUBLE, right, 0, comm_1D);
+
+    MPI_Recv(&left_prev, 1, MPI_DOUBLE, left, 0, comm_1D, &status);
+    MPI_Recv(&right_prev, 1, MPI_DOUBLE, right, 0, comm_1D, &status);
   }
 
-  double *uFull = nullptr;
-  if (rank == 0)
-    uFull = new double[(Nt + 1) * size * matrixPart];
+  auto *uFull = new double[(Nt + 1) * size * matrixPart];
 
+  //Собираем
   MPI_Gather(&currU[0], Nt + 1, MPI_RAW,
              &uFull[0], Nt + 1, MPI_RAW, 0, comm_1D);
 
