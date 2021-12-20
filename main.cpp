@@ -5,11 +5,11 @@
 
 using namespace std;
 
-const int N = 111;
+const int N = 191;
 const double a = 1.0;
 const double h = a / N;
 const double tau = h * h / 2 / 2;
-const double T = 0.5;
+const double T = 1;
 //Находим кол-во точек по шагам времени.
 const int Nt = T / tau;
 //лямбда
@@ -50,11 +50,6 @@ int main(int argc, char **argv) {
     int rank, size;
     MPI_Init(&argc, &argv);
     MPI_Comm_size(MPI_COMM_WORLD, &size);
-
-    if ((N + 1) % size != 0) {
-        std::cout << N + 1 << " должно делиться на число процессов без остатка";
-        MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
-    }
 
     auto time1 = MPI_Wtime();
 
@@ -118,6 +113,7 @@ int main(int argc, char **argv) {
     //Идем по времени от 0 до T.
     for (int t = 1; t < Nt; t++) {
         auto currTIdx = (t + 1) * currSize;
+        //Доходя до краев в каждом случае пересчитваем умф от предыщих значений справа и слева
         if (begIdx == 0) {
             currU[currTIdx] = 0.0;
             if (endIdx == N)
@@ -163,20 +159,23 @@ int main(int argc, char **argv) {
     MPI_Gather(&currU[0], Nt + 1, MPI_RAW,
                &uFull[0], Nt + 1, MPI_RAW, 0, comm_1D);
 
-    auto time2 = MPI_Wtime() - time1;
+    time1 = MPI_Wtime() - time1;
     //Собираем время
-    MPI_Gather(&time2, 1, MPI_DOUBLE,
+    MPI_Gather(&time1, 1, MPI_DOUBLE,
                fullTime, 1, MPI_DOUBLE, 0, comm_1D);
 
     if (rank == 0) {
 
         ofstream fileOutput = ofstream("output.txt");
+
+        fileOutput << "NxNT: " << fixed << N << "x" << Nt << "\n";
+
         auto maxTime = fullTime[0];
         for (int i = 0; i < size; i++) {
             if (fullTime[i] > maxTime)
                 maxTime = fullTime[i];
         }
-        fileOutput << "Time: " << maxTime * 1000 << "\n";
+        fileOutput << "Time: " << maxTime << "\n";
 
         //выводим координаты x
         fileOutput << 0 << ",";
