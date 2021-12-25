@@ -5,7 +5,7 @@
 
 using namespace std;
 
-const int N = 191;
+const int N = 15;
 const double a = 1.0;
 const double h = a / N;
 const double tau = h * h / 2 / 2;
@@ -151,8 +151,8 @@ int main(int argc, char **argv) {
     double *fullTime = nullptr;
     double *uFull = nullptr;
     if (rank == 0) {
-        uFull = new double[(Nt + 1) * size * matrixPart];
-        fullTime = new double[size];
+        uFull = new double[(Nt + 1) * size * matrixPart]{0};
+        fullTime = new double[size]{0};
     }
 
     //Собираем кусочки
